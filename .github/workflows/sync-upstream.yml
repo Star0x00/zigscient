@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: sync-upstream
@@ -33,6 +34,7 @@ jobs:
           ref: ${{ inputs.branch || 'dev' }}
 
       - name: Merge upstream
+        id: merge
         env:
           UPSTREAM: ${{ inputs.upstream || 'llogick/zigscient' }}
           BRANCH: ${{ inputs.branch || 'dev' }}
@@ -41,14 +43,33 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "https://github.com/${UPSTREAM}.git"
           git fetch upstream "${BRANCH}"
-          if git merge --ff-only "upstream/${BRANCH}"; then
-            echo "fast-forward"
+          if git merge --no-edit "upstream/${BRANCH}"; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
           else
-            git merge --no-edit "upstream/${BRANCH}"
+            git merge --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Push
+        if: steps.merge.outputs.status == 'clean'
         env:
           BRANCH: ${{ inputs.branch || 'dev' }}
+        run: git push origin "HEAD:${BRANCH}"
+
+      - name: Open pull request on conflict
+        if: steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: ${{ inputs.upstream || 'llogick/zigscient' }}
+          BRANCH: ${{ inputs.branch || 'dev' }}
         run: |
-          git push origin "HEAD:${BRANCH}"
+          git push origin "upstream/${BRANCH}:refs/heads/sync/upstream" --force
+          if [ -n "$(gh pr list --head sync/upstream --state open --json number -q '.[0].number')" ]; then
+            echo "::notice::Upstream sync PR already open"
+          else
+            gh pr create \
+              --base "${BRANCH}" \
+              --head sync/upstream \
+              --title "Sync upstream ${UPSTREAM}:${BRANCH}" \
+              --body "Automated upstream sync produced conflicts. Please resolve them in this pull request."
+          fi
