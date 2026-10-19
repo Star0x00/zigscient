@@ -34,9 +34,19 @@ jobs:
           fetch-depth: 0 # required to resolve the version string
           ref: ${{ inputs.tag || github.ref_name }}
 
+      - name: Resolve required Zig version
+        id: zigver
+        run: |
+          version=$(grep -m1 'minimum_zig_version' build.zig.zon | sed -E 's/.*"([^"]+)".*/\1/')
+          # dev builds are not archived; always use the latest master for those
+          case "$version" in
+            *-dev*) version=master ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: ${{ steps.zigver.outputs.version }}
 
       - name: Build ${{ matrix.target }}
         run: |
