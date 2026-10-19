@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-windows
+          - aarch64-windows
+          - x86_64-macos
+          - aarch64-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required to resolve the version string
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Build ${{ matrix.target }}
+        run: |
+          ZIG_DEBUG_CMD=1 ZIG_LIB_DIR=./lib zig build \
+            -Dcpu=baseline \
+            -Dtarget=${{ matrix.target }} \
+            -Doptimize=ReleaseFast
+          mkdir -p builds
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp zig-out/bin/zigscient.exe "builds/zigscient-${{ matrix.target }}.exe"
+          else
+            cp zig-out/bin/zigscient "builds/zigscient-${{ matrix.target }}"
+          fi
+          cp README.md LICENSE LICENSE-ZLS LICENSE-ZIG builds/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zigscient-${{ matrix.target }}
+          path: builds/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zigscient-*
+          merge-multiple: true
+          path: zigscient
+
+      - name: Create zips
+        run: |
+          cd zigscient
+          for file in *; do
+            if [ -d "$file" ]; then continue; fi
+            case "${file,,}" in
+              readme.md|license*) continue ;;
+            esac
+            zip -j "../${file%.*}.zip" "$file" README.md LICENSE LICENSE-ZLS LICENSE-ZIG
+          done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: "*.zip"

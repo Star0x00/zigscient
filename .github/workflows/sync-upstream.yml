@@ -1,0 +1,54 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: "Upstream repository (owner/repo)"
+        required: false
+        default: "llogick/zigscient"
+      branch:
+        description: "Branch to sync"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.branch || 'dev' }}
+
+      - name: Merge upstream
+        env:
+          UPSTREAM: ${{ inputs.upstream || 'llogick/zigscient' }}
+          BRANCH: ${{ inputs.branch || 'dev' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git fetch upstream "${BRANCH}"
+          if git merge --ff-only "upstream/${BRANCH}"; then
+            echo "fast-forward"
+          else
+            git merge --no-edit "upstream/${BRANCH}"
+          fi
+
+      - name: Push
+        env:
+          BRANCH: ${{ inputs.branch || 'dev' }}
+        run: |
+          git push origin "HEAD:${BRANCH}"
